@@ -60,21 +60,21 @@ all packages are always compiled asynchronously."
 (defvar async-bytecomp-load-variable-regexp "\\`load-path\\'"
   "The variable used by `async-inject-variables' when (re)compiling async.")
 
-(defun async-bytecomp--file-to-comp-buffer (file-or-dir &optional quiet type)
+(defun async-bytecomp--file-to-comp-buffer (file-or-dir &optional quiet type log-file)
   (let ((bn (file-name-nondirectory file-or-dir))
         (action-name (pcase type
                        ('file "File")
                        ('directory "Directory"))))
-    (if (file-exists-p async-byte-compile-log-file)
+    (if (and log-file (file-exists-p log-file))
         (let ((buf (get-buffer-create byte-compile-log-buffer))
               (n 0))
           (with-current-buffer buf
             (goto-char (point-max))
             (let ((inhibit-read-only t))
-              (insert-file-contents async-byte-compile-log-file)
+              (insert-file-contents log-file)
               (compilation-mode))
             (display-buffer buf)
-            (delete-file async-byte-compile-log-file)
+            (delete-file log-file)
             (unless quiet
               (save-excursion
                 (goto-char (point-min))
@@ -99,8 +99,8 @@ All *.elc files are systematically deleted before proceeding."
   ;; This happen when recompiling its own directory.
   (load "async")
   (let ((call-back
-         (lambda (&optional _ignore)
-           (async-bytecomp--file-to-comp-buffer directory quiet 'directory))))
+         (lambda (&optional log-file)
+           (async-bytecomp--file-to-comp-buffer directory quiet 'directory log-file))))
     (async-start
      `(lambda ()
         (require 'bytecomp)
@@ -113,9 +113,12 @@ All *.elc files are systematically deleted before proceeding."
             (setq error-data (with-current-buffer byte-compile-log-buffer
                                (buffer-substring-no-properties (point-min) (point-max))))
             (unless (string= error-data "")
-              (with-temp-file ,async-byte-compile-log-file
-                (erase-buffer)
-                (insert error-data))))))
+              (let ((log-file (format "%s.%s" ,async-byte-compile-log-file (emacs-pid))))
+                (with-temp-file log-file
+                  (erase-buffer)
+                  (insert error-data)
+                  (buffer-file-name))
+                log-file)))))
      call-back)
     (unless quiet (message "Started compiling asynchronously directory %s" directory))))
 
@@ -178,7 +181,7 @@ Same as `byte-compile-file' but asynchronous."
   (interactive "fFile: ")
   (let ((call-back
          (lambda (&optional _ignore)
-           (async-bytecomp--file-to-comp-buffer file nil 'file))))
+           (async-bytecomp--file-to-comp-buffer file nil 'file log-file))))
     (async-start
      `(lambda ()
         (require 'bytecomp)
@@ -191,9 +194,11 @@ Same as `byte-compile-file' but asynchronous."
             (setq error-data (with-current-buffer byte-compile-log-buffer
                                (buffer-substring-no-properties (point-min) (point-max))))
             (unless (string= error-data "")
-              (with-temp-file ,async-byte-compile-log-file
+              (let ((log-file (format "%s.%s" ,async-byte-compile-log-file (emacs-pid))))
+               (with-temp-file log-file
                 (erase-buffer)
-                (insert error-data))))))
+                (insert error-data))
+               log-file)))))
      call-back)))
 
 (provide 'async-bytecomp)
